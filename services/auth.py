@@ -1,25 +1,32 @@
 from datetime import datetime, timedelta, timezone
+from typing import Optional
+import hashlib
+import secrets
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from config import settings
 from database import get_db
 from models.user import User
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    """Hash password using SHA-256 with salt."""
+    salt = secrets.token_hex(16)
+    hash_obj = hashlib.sha256((salt + password).encode())
+    return f"{salt}${hash_obj.hexdigest()}"
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    """Verify password against hash."""
+    salt, hash_value = hashed.split('$')
+    hash_obj = hashlib.sha256((salt + plain).encode())
+    return hash_obj.hexdigest() == hash_value
 
 
 def create_access_token(user_id: int) -> str:
@@ -27,7 +34,7 @@ def create_access_token(user_id: int) -> str:
     return jwt.encode({"sub": str(user_id), "exp": expire}, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def authenticate_user(db: Session, email: str, password: str) -> User | None:
+def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
     user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(password, user.hashed_password):
         return None
